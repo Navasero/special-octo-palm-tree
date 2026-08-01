@@ -13,6 +13,12 @@ _Get started using GitHub in less than an hour._
 
 </header>
 
+> **VITA EMR architecture docs**: see [`docs/vita-emr/`](docs/vita-emr/README.md)
+> for the in-progress AI-native EMR architecture foundation (clarification
+> gate, competitive benchmark, ADRs, FHIR data model, diagrams, AI
+> governance, threat model). Unrelated to the GitHub tutorial below, which
+> is left as-is.
+
 <!--
   <<< Author notes: Step 1 >>>
   Choose 3-5 steps for your course.
