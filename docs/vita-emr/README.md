@@ -39,18 +39,24 @@ needs to move to its own repository.
 7. [`07-threat-model.md`](07-threat-model.md) — STRIDE threat model, trust
    boundaries, and a compliance-control map (explicitly flagged as
    illustrative where it touches jurisdiction-specific law).
+8. [`../../apps/vertical-slice/`](../../apps/vertical-slice/README.md) —
+   **running code**: one patient, one encounter, ambient note → structured
+   FHIR → signed → billed. `npm run demo` and `npm test` (41 tests), Node
+   ≥22.6, no dependencies. Read its README first for what is real in it and
+   what is stubbed — notably, its "model" is a deterministic rule-based
+   stand-in, not a language model.
 
 ## Scope of this milestone
 
 The Master Build Prompt describes a multi-quarter build for a multi-team
 org (twelve deliverables including a certified-quality threat model, a
 runnable vertical slice, a TCO spreadsheet, and a clickable UX prototype).
-This milestone deliberately covers the **docs-first foundation** slice of
-that list — the artifacts a team needs before writing a line of product
-code — and defers the following to later milestones, in this order:
+This milestone covers the **docs-first foundation** slice of that list — the
+artifacts a team needs before writing a line of product code — plus the
+working vertical slice (deliverable #10) in
+[`apps/vertical-slice/`](../../apps/vertical-slice/README.md). Deferred to
+later milestones, in this order:
 
-- Working vertical slice (one patient → ambient note → FHIR → signed →
-  billed) as runnable code
 - OpenAPI + FHIR CapabilityStatement
 - Clickable UX prototype of the three highest-volume workflows
 - Test strategy document (unit / integration / clinical-scenario / chaos /
