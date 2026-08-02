@@ -1,0 +1,21 @@
+{
+  "name": "@vita/vertical-slice",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "VITA EMR vertical slice: ambient note -> structured FHIR -> signed -> billed",
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "demo": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/demo.ts",
+    "serve": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/serve.ts",
+    "test": "node --experimental-strip-types --no-warnings=ExperimentalWarning --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.8.0"
+  },
+  "license": "MIT"
+}

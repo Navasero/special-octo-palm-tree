@@ -13,6 +13,13 @@ _Get started using GitHub in less than an hour._
 
 </header>
 
+> **VITA EMR**: architecture docs in [`docs/vita-emr/`](docs/vita-emr/README.md)
+> (clarification gate, competitive benchmark, ADRs, FHIR data model,
+> diagrams, AI governance, threat model) and a runnable vertical slice in
+> [`apps/vertical-slice/`](apps/vertical-slice/README.md) — ambient note →
+> structured FHIR → signed → billed. Unrelated to the GitHub tutorial below,
+> which is left as-is.
+
 <!--
   <<< Author notes: Step 1 >>>
   Choose 3-5 steps for your course.
