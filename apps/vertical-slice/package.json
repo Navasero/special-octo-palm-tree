@@ -9,12 +9,13 @@
   },
   "scripts": {
     "demo": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/demo.ts",
+    "serve": "node --experimental-strip-types --no-warnings=ExperimentalWarning src/serve.ts",
     "test": "node --experimental-strip-types --no-warnings=ExperimentalWarning --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.8.0"
   },
   "license": "MIT"
 }

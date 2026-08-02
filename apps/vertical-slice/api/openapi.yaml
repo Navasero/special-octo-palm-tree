@@ -1,0 +1,449 @@
+openapi: 3.1.0
+
+# Deliverable #6, HTTP half. The FHIR half is the CapabilityStatement served
+# live at GET /fhir/{tenant}/metadata — that one is generated from the same
+# constants the router enforces, so it cannot drift. This document describes
+# the HTTP envelope: paths, headers, status codes, media types.
+#
+# Scope note: this describes what the vertical slice actually implements, not
+# the eventual product surface. Absences are real (no update, no delete, no
+# _include, no paging) and are listed under "Not implemented" below.
+
+info:
+  title: VITA EMR — FHIR R4 API (vertical slice)
+  version: 0.1.0
+  summary: Event-sourced FHIR R4 server with audited reads and unconditional data export.
+  description: |
+    Every capability the clinical UI has is available here (doctrine #7:
+    open by construction). There is no interface fee, no partner tier, and
+    no capability reserved for the native client.
+
+    **Identity.** Every request that can reach PHI must carry `X-Actor-Id`
+    and `X-Purpose`. There is no anonymous read path. Identity is asserted
+    by header in this slice; a real deployment uses SMART on FHIR, which
+    changes how the actor is established but not the rule that one must
+    exist and be recorded.
+
+    **Audit.** Reads are audited as thoroughly as writes and are queryable
+    as `AuditEvent`. Emergency access via `X-Break-The-Glass` is permitted
+    and separately marked for mandatory post-hoc review.
+
+    **Export.** `Patient/{id}/$everything` and `$export` return a complete,
+    usable copy of the data in open-format FHIR, on demand, without vendor
+    involvement. This is the Section 8 acid test and it is deliberately an
+    ordinary endpoint rather than a feature that could be withheld.
+
+    **Not implemented in this slice:** update (`PUT`), delete, conditional
+    references, `_include`/`_revinclude`, paging (`_count` is accepted and
+    ignored), `_since` on export, asynchronous export kick-off/poll,
+    and FHIR profile validation on write.
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development server (npm run serve)
+
+tags:
+  - name: conformance
+    description: What this server can do.
+  - name: clinical
+    description: Reading and writing the record.
+  - name: provenance
+    description: Who or what authored a record, and who reviewed it.
+  - name: export
+    description: Taking a complete copy of the data.
+
+paths:
+  /fhir/{tenant}/metadata:
+    get:
+      tags: [conformance]
+      summary: CapabilityStatement
+      description: |
+        Carries no PHI, so it needs no identity — an integrator can discover
+        the server's capabilities before holding credentials.
+      operationId: getCapabilityStatement
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+      responses:
+        '200':
+          description: The server's capabilities.
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/CapabilityStatement'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fhir/{tenant}/{type}:
+    parameters:
+      - $ref: '#/components/parameters/Tenant'
+      - $ref: '#/components/parameters/ResourceType'
+    get:
+      tags: [clinical]
+      summary: Search a resource type
+      description: |
+        Returns a `searchset` Bundle. An unrecognised search parameter is a
+        400, never a silently unfiltered result — for PHI, returning more
+        than was asked for is the wrong failure direction.
+
+        Supported parameters vary by type; the CapabilityStatement is
+        authoritative.
+      operationId: searchResources
+      parameters:
+        - $ref: '#/components/parameters/ActorId'
+        - $ref: '#/components/parameters/Purpose'
+        - $ref: '#/components/parameters/BreakTheGlass'
+        - name: patient
+          in: query
+          description: Patient reference or bare id (e.g. `pat-0001` or `Patient/pat-0001`).
+          schema: { type: string }
+        - name: subject
+          in: query
+          description: Synonym for `patient`.
+          schema: { type: string }
+        - name: encounter
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          description: Matches `status`, or `docStatus` on DocumentReference.
+          schema: { type: string }
+        - name: _id
+          in: query
+          schema: { type: string }
+        - name: target
+          in: query
+          description: Required for `Provenance`. Form `Type/id`.
+          schema: { type: string }
+      responses:
+        '200':
+          description: A searchset Bundle.
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Bundle'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PurposeRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [clinical]
+      summary: Create a resource
+      description: |
+        The created resource is attributed to `X-Actor-Id` as a **human**
+        author. A caller cannot assert that a model authored a record:
+        AI-authored content enters only through the ambient pipeline, which
+        attaches provenance and places the result in front of a clinician
+        for accept/edit/reject. Allowing the claim here would route around
+        that review contract.
+
+        Resources that touch money (`Claim`) are not writable — they are
+        produced by the billing path, which requires a signed note.
+      operationId: createResource
+      parameters:
+        - $ref: '#/components/parameters/ActorId'
+        - $ref: '#/components/parameters/Purpose'
+      requestBody:
+        required: true
+        content:
+          application/fhir+json:
+            schema:
+              $ref: '#/components/schemas/Resource'
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Resource'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '405':
+          description: This resource type is not writable over the API.
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/OperationOutcome'
+
+  /fhir/{tenant}/{type}/{id}:
+    get:
+      tags: [clinical]
+      summary: Read a resource instance
+      operationId: readResource
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/ResourceType'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/ActorId'
+        - $ref: '#/components/parameters/Purpose'
+        - $ref: '#/components/parameters/BreakTheGlass'
+      responses:
+        '200':
+          description: The resource.
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Resource'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/PurposeRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fhir/{tenant}/Patient/{id}/$everything:
+    get:
+      tags: [export]
+      summary: Complete record for one patient
+      description: |
+        Every resource for the patient **plus the `Provenance` for each one**.
+        Provenance is not optional garnish: a record that arrives without it
+        leaves the receiving system unable to tell which entries a clinician
+        attested to and which a model drafted — precisely the distinction
+        that matters to whoever acts on it next.
+
+        Rejected AI drafts are absent, because they are not part of the
+        clinical record.
+      operationId: patientEverything
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/ActorId'
+        - $ref: '#/components/parameters/Purpose'
+        - $ref: '#/components/parameters/BreakTheGlass'
+      responses:
+        '200':
+          description: A Bundle containing the complete record.
+          content:
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/Bundle'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /fhir/{tenant}/$export:
+    get:
+      tags: [export]
+      summary: Tenant-wide Bulk FHIR export
+      description: |
+        Returns every resource in the tenant as newline-delimited JSON, one
+        complete resource per line.
+
+        Audited **per patient**, not once for the run: "someone exported
+        everything" is not an adequate record of whose data left the
+        building. Bulk export is the highest-value target for an insider, so
+        permitting it and recording it in detail are the same requirement.
+
+        Synchronous in this slice. The manifest shape matches the
+        asynchronous kick-off/poll contract, so a client written against it
+        does not need rewriting when that lands.
+      operationId: tenantExport
+      parameters:
+        - $ref: '#/components/parameters/Tenant'
+        - $ref: '#/components/parameters/ActorId'
+        - $ref: '#/components/parameters/Purpose'
+        - name: _outputFormat
+          in: query
+          description: Pass `manifest` for the file listing instead of the payload.
+          schema:
+            type: string
+            enum: [manifest]
+      responses:
+        '200':
+          description: NDJSON payload, or the manifest when requested.
+          content:
+            application/fhir+ndjson:
+              schema:
+                type: string
+                description: One complete FHIR resource per line.
+            application/fhir+json:
+              schema:
+                $ref: '#/components/schemas/ExportManifest'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+
+components:
+  parameters:
+    Tenant:
+      name: tenant
+      in: path
+      required: true
+      description: |
+        Tenant identifier. Each tenant is an isolated event log with its own
+        key material. An unknown tenant and a tenant you cannot see return
+        the same 404 — tenant existence is itself information.
+      schema: { type: string }
+      example: tenant-district-hospital-01
+    ResourceType:
+      name: type
+      in: path
+      required: true
+      schema:
+        type: string
+        enum:
+          - Patient
+          - Encounter
+          - Condition
+          - Observation
+          - MedicationRequest
+          - AllergyIntolerance
+          - DocumentReference
+          - Claim
+          - Provenance
+          - AuditEvent
+    ActorId:
+      name: X-Actor-Id
+      in: header
+      required: true
+      description: Who is asking. There is no anonymous path to PHI.
+      schema: { type: string }
+      example: prac-0007
+    Purpose:
+      name: X-Purpose
+      in: header
+      required: true
+      description: |
+        Why. Recorded verbatim in the audit log, so an after-the-fact review
+        can ask whether the stated reason justified the access.
+      schema: { type: string }
+      example: treatment
+    BreakTheGlass:
+      name: X-Break-The-Glass
+      in: header
+      required: false
+      description: |
+        Justification for emergency access outside normal authorisation.
+        Permitted, recorded, and flagged for mandatory post-hoc review — the
+        answer to an emergency is never to make the access invisible.
+      schema: { type: string }
+
+  responses:
+    Unauthenticated:
+      description: No `X-Actor-Id`. Anonymous access to PHI is refused.
+      content:
+        application/fhir+json:
+          schema:
+            $ref: '#/components/schemas/OperationOutcome'
+    PurposeRequired:
+      description: No `X-Purpose`. Every access to PHI must state why it happened.
+      content:
+        application/fhir+json:
+          schema:
+            $ref: '#/components/schemas/OperationOutcome'
+    BadRequest:
+      description: Malformed request, or an unsupported search parameter.
+      content:
+        application/fhir+json:
+          schema:
+            $ref: '#/components/schemas/OperationOutcome'
+    NotFound:
+      description: No such tenant, resource type, or instance.
+      content:
+        application/fhir+json:
+          schema:
+            $ref: '#/components/schemas/OperationOutcome'
+
+  schemas:
+    Resource:
+      type: object
+      description: |
+        Any FHIR R4 resource. Shapes are constrained by the profile set in
+        docs/vita-emr/04-fhir-data-dictionary.md. Profile validation on write
+        is not yet enforced by this slice.
+      required: [resourceType, id]
+      properties:
+        resourceType: { type: string }
+        id: { type: string }
+      additionalProperties: true
+
+    Bundle:
+      type: object
+      required: [resourceType, type, total, entry]
+      properties:
+        resourceType: { type: string, const: Bundle }
+        id: { type: string }
+        type:
+          type: string
+          enum: [searchset, collection, document, batch-response]
+        timestamp: { type: string, format: date-time }
+        total: { type: integer }
+        entry:
+          type: array
+          items:
+            type: object
+            properties:
+              fullUrl: { type: string }
+              resource: { $ref: '#/components/schemas/Resource' }
+              search:
+                type: object
+                properties:
+                  mode: { type: string, enum: [match, include] }
+
+    OperationOutcome:
+      type: object
+      required: [resourceType, issue]
+      properties:
+        resourceType: { type: string, const: OperationOutcome }
+        issue:
+          type: array
+          items:
+            type: object
+            required: [severity, code, diagnostics]
+            properties:
+              severity: { type: string, enum: [fatal, error, warning, information] }
+              code: { type: string }
+              diagnostics: { type: string }
+
+    CapabilityStatement:
+      type: object
+      description: |
+        Generated from the same constants the router enforces, and asserted
+        by the test suite to match. A CapabilityStatement that overstates the
+        server is worse than none, because integrators build against it.
+      required: [resourceType, fhirVersion, rest]
+      properties:
+        resourceType: { type: string, const: CapabilityStatement }
+        fhirVersion: { type: string, const: 4.0.1 }
+        software:
+          type: object
+          properties:
+            name: { type: string }
+            version: { type: string }
+        rest:
+          type: array
+          items: { type: object }
+      additionalProperties: true
+
+    ExportManifest:
+      type: object
+      required: [transactionTime, request, requiresAccessToken, output]
+      properties:
+        transactionTime: { type: string, format: date-time }
+        request: { type: string }
+        requiresAccessToken: { type: boolean }
+        output:
+          type: array
+          items:
+            type: object
+            required: [type, count]
+            properties:
+              type: { type: string }
+              count: { type: integer }
+        error:
+          type: array
+          items: { type: object }

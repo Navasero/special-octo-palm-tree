@@ -185,3 +185,77 @@ export type ClinicalResource =
   | Claim;
 
 export type ResourceType = ClinicalResource['resourceType'];
+
+// ── Infrastructure resources (API surface) ──────────────────────────────────
+
+/**
+ * Every read of PHI, as a FHIR resource rather than a proprietary log format.
+ * An auditor should be able to pull the access log with the same client they
+ * use for the chart.
+ */
+export type AuditEvent = ResourceBase & {
+  resourceType: 'AuditEvent';
+  type: Coding;
+  action: 'C' | 'R' | 'U' | 'D';
+  recorded: string;
+  outcome: '0' | '4' | '8';
+  agent: {
+    who: Reference;
+    requestor: boolean;
+    purposeOfUse?: CodeableConcept[];
+  }[];
+  entity: { what: Reference; detail?: { type: string; valueString: string }[] }[];
+};
+
+export type AnyResource = ClinicalResource | Provenance | AuditEvent;
+
+export type BundleEntry = {
+  fullUrl?: string;
+  resource: AnyResource;
+  search?: { mode: 'match' | 'include' };
+};
+
+export type Bundle = {
+  resourceType: 'Bundle';
+  id: string;
+  type: 'searchset' | 'collection' | 'document' | 'batch-response';
+  timestamp: string;
+  total: number;
+  link?: { relation: string; url: string }[];
+  entry: BundleEntry[];
+};
+
+export type OperationOutcome = {
+  resourceType: 'OperationOutcome';
+  issue: {
+    severity: 'fatal' | 'error' | 'warning' | 'information';
+    code: string;
+    diagnostics: string;
+  }[];
+};
+
+export type CapabilityStatement = {
+  resourceType: 'CapabilityStatement';
+  id: string;
+  status: 'draft' | 'active';
+  date: string;
+  publisher: string;
+  kind: 'instance' | 'capability';
+  software: { name: string; version: string };
+  implementation?: { description: string; url?: string };
+  fhirVersion: string;
+  format: string[];
+  rest: {
+    mode: 'server';
+    documentation?: string;
+    security?: { description: string };
+    resource: {
+      type: string;
+      profile?: string;
+      interaction: { code: string; documentation?: string }[];
+      searchParam?: { name: string; type: string; documentation?: string }[];
+      operation?: { name: string; definition: string; documentation?: string }[];
+    }[];
+    operation?: { name: string; definition: string; documentation?: string }[];
+  }[];
+};

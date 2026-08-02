@@ -5,8 +5,9 @@ note → structured FHIR → signed → billed**, as running code.
 
 ```bash
 cd apps/vertical-slice
-npm run demo     # walks the whole flow, prints the trace
-npm test         # 41 tests
+npm run demo       # walks the whole flow, prints the trace
+npm run serve      # FHIR REST API over a seeded encounter (PORT=8080)
+npm test           # 65 tests
 npm run typecheck  # requires: npm install
 ```
 
@@ -34,8 +35,51 @@ start.
    **draft** claim, and requires a human to activate it.
 9. Prints the chart, the provenance ledger, override-rate statistics, the
    PHI read audit, hash-chain verification, and per-encounter inference cost.
-10. Re-runs the whole thing with AI switched off, to show the record still
+10. Runs the **acid test** — exports the complete record.
+11. Re-runs the whole thing with AI switched off, to show the record still
     works.
+
+## The API
+
+`npm run serve` starts a FHIR R4 REST server over the same event log
+(`node:http`, no framework). `api/openapi.yaml` describes the HTTP envelope;
+`GET /fhir/{tenant}/metadata` serves a live CapabilityStatement generated
+from the same constants the router enforces — the test suite asserts the two
+agree, because a CapabilityStatement that overstates the server is worse than
+none.
+
+Two rules a generic FHIR server would not impose:
+
+- **No anonymous path to PHI.** `X-Actor-Id` and `X-Purpose` are required on
+  every request that can reach it; the read is written to the audit log
+  before the response is sent. `X-Break-The-Glass` permits emergency access
+  and marks it for post-hoc review. Reads are queryable as `AuditEvent`.
+- **Writes are human-authored by construction.** A caller cannot assert that
+  a model wrote something. AI content enters only through the ambient
+  pipeline, which attaches provenance and puts the result in front of a
+  clinician — letting the API claim otherwise would route around the review
+  contract. `Claim` is not writable at all.
+
+### The acid test
+
+Section 8 of the build prompt asks for proof that a competitor could take a
+complete, usable copy of the data on demand, without our involvement — and
+says to build it and put it in the demo. It is two ordinary endpoints:
+
+```bash
+# One patient's complete record, including the Provenance for every resource
+curl -H "X-Actor-Id: prac-0007" -H "X-Purpose: treatment" \
+     "$BASE/Patient/pat-0001/\$everything"
+
+# The whole tenant, as Bulk FHIR NDJSON
+curl -H "X-Actor-Id: ops-0001" -H "X-Purpose: tenant-export" "$BASE/\$export"
+```
+
+Provenance is included deliberately: a record that arrives without it leaves
+the receiving system unable to tell which entries a clinician attested to and
+which a model drafted. Bulk export is audited **per patient**, not once per
+run — "someone exported everything" is not an adequate record of whose data
+left the building.
 
 ## The one thing to be clear about
 
@@ -64,8 +108,10 @@ depends on a specific model.
 | ADR-0004 provenance ledger | `src/core/provenance.ts` |
 | ADR-0005 tiered model routing | `src/ai/router.ts` |
 | ADR-0007 terminology service | `src/ai/lexicon.ts` *(stubbed — see below)* |
-| ADR-0008 tenant isolation | `EventLog` rejects cross-tenant writes |
+| ADR-0008 tenant isolation | `EventLog` rejects cross-tenant writes; one log per tenant in the API |
 | ADR-0010 documentation scope | Note drafts, never diagnoses; no CDS |
+| Doctrine #7 open by construction | `src/api/`, `api/openapi.yaml`, live CapabilityStatement |
+| Section 8 acid test | `src/api/export.ts` — `$everything` and `$export` |
 
 ## Properties the tests actually pin down
 
@@ -83,6 +129,17 @@ compliance problem rather than a bug:
   site is not routed to a provider needing connectivity.
 - With AI disabled the encounter still completes, costs nothing, and leaves
   an **empty provenance ledger**.
+- PHI is **unreachable without an actor and a purpose**; every read reaches
+  the audit log; break-the-glass is separately marked.
+- An **unsupported search parameter is a 400**, not a silently unfiltered
+  result.
+- `$everything` carries provenance, omits rejected drafts, and the exported
+  note is the **signed** one.
+- Every `$export` NDJSON line **independently parses** as a complete
+  resource.
+- The **CapabilityStatement does not lie**: declared types are readable,
+  declared search params are the ones enforced, and `create` is declared
+  only where writes are accepted.
 
 ## What this slice is not
 
@@ -95,11 +152,13 @@ compliance problem rather than a bug:
 - **Not offline sync.** CRDT reconciliation (ADR-0003) is designed but not
   implemented here; this slice covers a single node.
 - **No CDS.** Per ADR-0010, Layer 3 is out of scope at this stage.
-- **No API surface.** OpenAPI + FHIR CapabilityStatement are a separate
-  deliverable.
 - **Not validated against a FHIR profile validator.** Resources are shaped
   to R4 and to the profiles in the data dictionary, but profile validation
   (which ADR-0001 makes the primary data-quality gate) is not wired up.
+- **API is partial.** No update or delete, no `_include`, no paging
+  (`_count` is accepted and ignored), no `_since` on export, and export is
+  synchronous rather than the asynchronous kick-off/poll pattern. Identity
+  is asserted by header, not SMART on FHIR. All listed in `openapi.yaml`.
 
 ## Sample output
 
